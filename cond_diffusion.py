@@ -20,7 +20,7 @@ def parse_args():
     )
     
     # Data arguments
-    parser.add_argument("--data_dir", type=str, default="/data/aai/scratch_ssd/hguo/DESI/",
+    parser.add_argument("--data_dir", type=str, default="/data/",
                         help="Directory containing train.parquet, val.parquet, test.parquet")
     parser.add_argument("--cond_names", type=str, nargs="+",
                         default=['FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_W2'],
@@ -72,9 +72,9 @@ def parse_args():
                         help="Chunk size for inference to avoid OOM")
     
     # I/O arguments
-    parser.add_argument("--checkpoint", type=str, default="./checkpoints/cond_ddpm_ema_best.pth",
+    parser.add_argument("--checkpoint", type=str, default="./checkpoints/cond_diffusion_best.pth",
                         help="Path to save/load model checkpoint")
-    parser.add_argument("--output_dir", type=str, default="/data/aai/scratch/hguo/DESI/",
+    parser.add_argument("--output_dir", type=str, default="/data/",
                         help="Directory to save prediction results")
 
     return parser.parse_args()
