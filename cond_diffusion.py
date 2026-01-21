@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 # =============================================================================
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Conditional DDPM/DDIM for predicting astrophysical features from flux",
+        description="Conditional diffusion for predicting features from fluxes",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
