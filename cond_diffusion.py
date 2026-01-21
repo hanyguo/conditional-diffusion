@@ -1,14 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-Conditional DDPM/DDIM for Tabular Features
-Predicting astrophysical features and redshift from flux
-
-Usage:
-    python cdmddim_modify.py --data_dir ./data/splits --cond_dim 143
-    python cdmddim_modify.py --mode inference --checkpoint ./checkpoints/model.pth
-    python cdmddim_modify.py --help
-"""
 import os
 import math
 import random
