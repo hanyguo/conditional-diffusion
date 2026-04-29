@@ -1,8 +1,6 @@
-Codes for “Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion”.
+This repository contains the implementation of the conditional diffusion model used in the paper “Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion”.
 
-A PyTorch implementation of a Conditional Denoising Diffusion Probabilistic Model for predicting redshift and other features from photometric fluxes.
-
-This model learns the conditional distribution $p(\mathbf{y} | \mathbf{x})$, where $\mathbf{x}$ is the input photometry (fluxes) and $\mathbf{y}$ are the target features. By sampling from this distribution, it provides principled uncertainty estimation.
+The model learns the conditional distribution p(y | x), where x denotes the input photometric fluxes and y denotes the target redshift and spectral features. By drawing multiple samples from this distribution, it provides probabilistic predictions and uncertainty estimates.
 
 ## Usage
 
