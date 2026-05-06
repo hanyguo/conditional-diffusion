@@ -1,6 +1,6 @@
 This repository contains the implementation of the conditional diffusion model used in the paper “Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion”.
 
-The model learns the conditional distribution p(y | x), where x denotes the input photometric fluxes and y denotes the target redshift and spectral features. By drawing multiple samples from this distribution, it provides probabilistic predictions and uncertainty estimates.
+The model learns the conditional distribution p(t | X), where X denotes the input photometric fluxes and t = [s; z] concatenates a spectral latent representation s with the galaxy redshift z. By drawing multiple samples from this distribution, it provides probabilistic predictions.
 
 ## Usage
 
