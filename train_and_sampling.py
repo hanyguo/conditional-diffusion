@@ -1,4 +1,15 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Conditional DDPM/DDIM for Tabular Features
+Predicting astrophysical features and redshift from flux
+
+Usage:
+    python train_and_sampling.py --data_dir ./data
+    python train_and_sampling.py --help
+"""
 import os
+import time
 import random
 import argparse
 import numpy as np
@@ -8,6 +19,20 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 from models import Diffusion, CondDenoiser
+
+
+def format_duration(seconds):
+    """Format elapsed seconds as H:MM:SS.sss."""
+    seconds = max(0.0, float(seconds))
+    hours, rem = divmod(seconds, 3600)
+    minutes, rem = divmod(rem, 60)
+    return f"{int(hours):d}h {int(minutes):02d}m {rem:06.3f}s"
+
+
+def sync_device(device):
+    """Wait for pending CUDA kernels so wall-clock timing is accurate."""
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 # =============================================================================
@@ -34,6 +59,9 @@ def parse_args():
                         help="Hidden dimension of the denoiser network")
     parser.add_argument("--time_dim", type=int, default=256,
                         help="Time embedding dimension")
+    parser.add_argument("--conditioning_method", type=str, default="concat",
+                        choices=["concat", "adaln"],
+                        help="Condition injection method used by the denoiser")
     parser.add_argument("--diffusion_steps", type=int, default=200,
                         help="Number of diffusion steps (T)")
     parser.add_argument("--beta_start", type=float, default=1e-4,
@@ -144,9 +172,38 @@ def save_checkpoint(path, ema_model, model, metadata=None):
     print(f"Model saved to: {path}")
 
 
-def load_checkpoint(path, ema_model, model, device):
+class CheckpointConfigError(ValueError):
+    """Raised when a checkpoint is incompatible with the requested model."""
+
+
+def load_checkpoint(
+    path,
+    ema_model,
+    model,
+    device,
+    expected_method,
+    expected_t,
+):
     """Load model checkpoint."""
     ckpt = torch.load(path, map_location=device)
+    metadata = ckpt.get('metadata', {})
+    saved_method = metadata.get('conditioning_method', 'concat')
+    saved_t = metadata.get('T')
+    if saved_method != expected_method:
+        raise CheckpointConfigError(
+            f"checkpoint uses conditioning_method={saved_method!r}, "
+            f"but the current run requests {expected_method!r}"
+        )
+    if saved_t is not None and int(saved_t) != int(expected_t):
+        raise CheckpointConfigError(
+            f"checkpoint uses T={saved_t}, but the current run requests T={expected_t}"
+        )
+    saved_architecture = metadata.get('conditioning_architecture')
+    if expected_method == 'adaln' and saved_architecture != 'nonresidual_adaln_v1':
+        raise CheckpointConfigError(
+            "checkpoint was not trained with the current non-residual AdaLN architecture"
+        )
+
     if 'ema_state_dict' in ckpt:
         ema_model.load_state_dict(ckpt['ema_state_dict'])
     if 'model_state_dict' in ckpt:
@@ -154,7 +211,7 @@ def load_checkpoint(path, ema_model, model, device):
             model.load_state_dict(ckpt['model_state_dict'])
         except Exception as e:
             print(f"Failed to load model weights, using EMA weights only: {e}")
-    return ckpt.get('metadata', {})
+    return metadata
 
 
 @torch.no_grad()
@@ -346,14 +403,31 @@ def main():
     cond_dim = Xtr.shape[1]
     
     # Initialize models
-    model = CondDenoiser(feat_dim=feat_dim, cond_dim=cond_dim, hidden=args.hidden_dim, time_dim=args.time_dim).to(device)
+    model = CondDenoiser(
+        feat_dim=feat_dim,
+        cond_dim=cond_dim,
+        hidden=args.hidden_dim,
+        time_dim=args.time_dim,
+        conditioning_method=args.conditioning_method,
+    ).to(device)
     diff = Diffusion(T=args.diffusion_steps, beta_start=args.beta_start, beta_end=args.beta_end, device=device)
     
     # EMA model
-    ema_model = CondDenoiser(feat_dim=feat_dim, cond_dim=cond_dim, hidden=args.hidden_dim, time_dim=args.time_dim).to(device)
+    ema_model = CondDenoiser(
+        feat_dim=feat_dim,
+        cond_dim=cond_dim,
+        hidden=args.hidden_dim,
+        time_dim=args.time_dim,
+        conditioning_method=args.conditioning_method,
+    ).to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(
+        f"Conditioning method: {args.conditioning_method} | "
+        f"Trainable parameters: {n_params:,}"
+    )
     
     # Optimizer
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -362,19 +436,35 @@ def main():
     skipped_training = False
     if os.path.isfile(args.checkpoint):
         try:
-            meta = load_checkpoint(args.checkpoint, ema_model, model, device)
+            meta = load_checkpoint(
+                args.checkpoint,
+                ema_model,
+                model,
+                device,
+                expected_method=args.conditioning_method,
+                expected_t=args.diffusion_steps,
+            )
             skipped_training = True
             print(f"Loaded existing model from {args.checkpoint}, skipping training.")
+        except CheckpointConfigError as e:
+            raise CheckpointConfigError(
+                f"{e}. Use a different --checkpoint path for this experiment."
+            ) from e
         except Exception as e:
             print(f"Failed to load model, will retrain: {e}")
     
     # Training loop
+    train_seconds = None
     if not skipped_training:
         best_rmse = float('inf')
         best_state = None
         epochs_no_improve = 0
-        
+        n_epochs_run = 0
+
+        sync_device(device)
+        t_train0 = time.perf_counter()
         for ep in range(1, args.epochs + 1):
+            n_epochs_run = ep
             tr_loss = train_epoch(model, ema_model, diff, dl_tr, opt, device, args.ema_decay)
             mse_val, rmse_val = eval_recon(ema_model, diff, Xval, yval, device, feat_dim, args)
             print(f"[Ep{ep:03d}] train_noiseMSE={tr_loss:.6f}  val_recon MSE={mse_val:.6f} RMSE={rmse_val:.6f}")
@@ -390,6 +480,14 @@ def main():
                     print(f"Early stopping at epoch {ep} (patience={args.patience}).")
                     break
 
+        sync_device(device)
+        train_seconds = time.perf_counter() - t_train0
+        print(
+            f"Training time: {format_duration(train_seconds)} "
+            f"({train_seconds:.2f} s, {n_epochs_run} epochs, "
+            f"{train_seconds / max(n_epochs_run, 1):.2f} s/epoch)"
+        )
+
         # Restore best EMA model
         if best_state is not None:
             ema_model.load_state_dict(best_state)
@@ -403,11 +501,28 @@ def main():
             'beta_start': float(diff.betas[0].detach().cpu().item()),
             'beta_end': float(diff.betas[-1].detach().cpu().item()),
             'seed': int(args.seed),
+            'conditioning_method': args.conditioning_method,
+            'conditioning_architecture': (
+                'nonresidual_adaln_v1'
+                if args.conditioning_method == 'adaln'
+                else 'input_concat_v1'
+            ),
         })
 
     # Sampling
     print("Running sampling on test set...")
+    sync_device(device)
+    t_infer0 = time.perf_counter()
     y_preds_multi, y_true = reconstruct_on_test_multi(ema_model, diff, Xte, yte, device, feat_dim, args)
+    sync_device(device)
+    infer_seconds = time.perf_counter() - t_infer0
+    n_test = int(Xte.shape[0])
+    n_draws = max(1, args.num_samples)
+    print(
+        f"Inference time: {format_duration(infer_seconds)} "
+        f"({infer_seconds:.2f} s, {n_test} objects x {n_draws} samples, "
+        f"{infer_seconds / n_test:.4f} s/object)"
+    )
     
     # Compute metrics using single sample (first sample) for fair comparison with validation
     # Use configured evaluation subset (default 2000)
@@ -417,17 +532,26 @@ def main():
         n_eval = y_true.shape[0]
     y_pred_single = y_preds_multi[0][:n_eval]  # Take the first sample
     metrics = compute_metrics(y_pred_single, y_true[:n_eval])
-    print(f"Test metrics (single sample, all data): {metrics}")
+    print(f"Test metrics (single sample, n={n_eval}): {metrics}")
     
     # Also compute metrics using mean of predictions (optional, for reference)
     y_pred_mean = y_preds_multi.mean(axis=0)
     metrics_mean = compute_metrics(y_pred_mean[:n_eval], y_true[:n_eval])
-    print(f"Test metrics (mean of {args.num_samples} samples, all data): {metrics_mean}")
+    print(f"Test metrics (mean of {args.num_samples} samples, n={n_eval}): {metrics_mean}")
     
     # Save predictions (including condition columns)
-    out_path = os.path.join(args.output_dir, f"samples_{args.num_samples}.parquet")
+    out_path = os.path.join(
+        args.output_dir,
+        f"T{args.diffusion_steps}_{args.conditioning_method}_{args.num_samples}.parquet",
+    )
     save_predictions(y_preds_multi, y_true, Xte, id_te, args.cond_names, args.target_names, out_path)
     
+    print("----- Timing summary -----")
+    if train_seconds is None:
+        print("Training time: skipped (loaded existing checkpoint)")
+    else:
+        print(f"Training time: {format_duration(train_seconds)} ({train_seconds:.2f} s)")
+    print(f"Inference time: {format_duration(infer_seconds)} ({infer_seconds:.2f} s)")
     print("Done!")
 
 
