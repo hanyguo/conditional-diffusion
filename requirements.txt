@@ -1,11 +1,11 @@
-## Requirements
-- numpy>=1.26.0
-- pandas>=2.0.0
-- torch>=2.0.0
-- pyarrow>=15.0.0  
+# Requirements
+numpy>=1.26.0
+pandas>=2.0.0
+torch>=2.0.0
+pyarrow>=15.0.0
 
-## Tested Environment
-- Python 3.10
-- PyTorch 2.4.0 (CUDA 12.1)
-- NumPy 1.26.3
-- Pandas 2.3.1
+# Tested environment
+# Python 3.10
+# PyTorch 2.4.0 (CUDA 12.1)
+# NumPy 1.26.3
+# Pandas 2.3.1
