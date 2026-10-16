@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Model architectures for Conditional DDPM/DDIM
+
+Contains:
+    - Diffusion: DDPM/DDIM forward and reverse diffusion process
+    - CondDenoiser: Conditional noise prediction network
+    - SinusoidalTimeEmbedding: Sinusoidal timestep embedding
+"""
 import math
 import torch
 import torch.nn as nn
@@ -135,11 +145,47 @@ class SinusoidalTimeEmbedding(nn.Module):
         return emb
 
 
+class AdaLNLayer(nn.Module):
+    """Non-residual MLP layer with adaptive LayerNorm conditioning."""
+
+    def __init__(self, hidden, context_dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden, elementwise_affine=False)
+        self.modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(context_dim, 2 * hidden),
+        )
+        self.linear = nn.Linear(hidden, hidden)
+
+        # Initially reduce to ordinary LayerNorm; conditioning is learned
+        # gradually through the adaptive scale and shift.
+        nn.init.zeros_(self.modulation[-1].weight)
+        nn.init.zeros_(self.modulation[-1].bias)
+
+    def forward(self, h, context):
+        shift, scale = self.modulation(context).chunk(2, dim=1)
+        h_mod = self.norm(h) * (1.0 + scale) + shift
+        return nn.functional.silu(self.linear(h_mod))
+
+
 class CondDenoiser(nn.Module):
     """Conditional noise predictor eps_theta(x_t, t, cond)."""
     
-    def __init__(self, feat_dim, cond_dim, hidden=256, time_dim=128):
+    def __init__(
+        self,
+        feat_dim,
+        cond_dim,
+        hidden=256,
+        time_dim=128,
+        conditioning_method="concat",
+    ):
         super().__init__()
+        if conditioning_method not in {"concat", "adaln"}:
+            raise ValueError(
+                "conditioning_method must be either 'concat' or 'adaln', "
+                f"got {conditioning_method!r}"
+            )
+        self.conditioning_method = conditioning_method
         self.time_mlp = nn.Sequential(
             SinusoidalTimeEmbedding(time_dim),
             nn.Linear(time_dim, time_dim),
@@ -155,23 +201,47 @@ class CondDenoiser(nn.Module):
             nn.Linear(hidden, hidden),
             nn.SiLU(),
         )
-        self.net = nn.Sequential(
-            nn.Linear(feat_dim + time_dim + hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, feat_dim),
-        )
+
+        if conditioning_method == "concat":
+            self.net = nn.Sequential(
+                nn.Linear(feat_dim + time_dim + hidden, hidden),
+                nn.SiLU(),
+                nn.Linear(hidden, hidden),
+                nn.SiLU(),
+                nn.Linear(hidden, hidden),
+                nn.SiLU(),
+                nn.Linear(hidden, hidden),
+                nn.SiLU(),
+                nn.Linear(hidden, hidden),
+                nn.SiLU(),
+                nn.Linear(hidden, feat_dim),
+            )
+        else:
+            # Compress time and flux embeddings into the context supplied to
+            # every adaptive-normalization block.
+            self.context_mlp = nn.Sequential(
+                nn.Linear(time_dim + hidden, time_dim),
+                nn.SiLU(),
+                nn.Linear(time_dim, time_dim),
+            )
+            self.input_proj = nn.Linear(feat_dim, hidden)
+            # Four adaptive hidden layers match the four hidden-to-hidden
+            # layers in the concatenation backbone.
+            self.adaln_layers = nn.ModuleList(
+                AdaLNLayer(hidden, time_dim) for _ in range(4)
+            )
+            self.output_proj = nn.Linear(hidden, feat_dim)
 
     def forward(self, x_t, t, cond):
         t_embed = self.time_mlp(t)
         c_embed = self.cond_mlp(cond)
-        h = torch.cat([x_t, t_embed, c_embed], dim=1)
-        eps = self.net(h)
-        return eps
+
+        if self.conditioning_method == "concat":
+            h = torch.cat([x_t, t_embed, c_embed], dim=1)
+            return self.net(h)
+
+        context = self.context_mlp(torch.cat([t_embed, c_embed], dim=1))
+        h = nn.functional.silu(self.input_proj(x_t))
+        for layer in self.adaln_layers:
+            h = layer(h, context)
+        return self.output_proj(h)
