@@ -3,7 +3,8 @@
 This repository contains the implementation of the **conditional diffusion model** used in:
 
 > Guo, H.-Y. & Eriksen, M.  
-> *Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion*
+> *Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion*  
+> [arXiv:2605.10753](https://arxiv.org/abs/2605.10753)
 
 
 This repository trains and samples the conditional diffusion model. Given broadband photometric fluxes $\mathbf{x}$, the model learns the conditional distribution $p(\mathbf{t}_0 \mid \mathbf{x})$, where $\mathbf{t}_0 = [\mathbf{s}; z]$ concatenates a spectral latent representation $\mathbf{s}$ with the galaxy redshift $z$. Drawing multiple samples from this distribution provides probabilistic predictions of redshift and spectral latents. Sampled latents can be decoded into rest-frame spectra with a `spender` decoder (Melchior et al. 2023); the public [`spender`](https://github.com/pmelchior/spender) repository provides the autoencoder implementation used for that step.
@@ -40,7 +41,7 @@ Each file should contain:
 ## Installation
 
 ```bash
-pip install torch numpy pandas pyarrow
+pip install -r requirements.txt
 ```
 
 ## Usage
