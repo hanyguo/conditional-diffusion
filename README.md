@@ -6,10 +6,8 @@ This repository contains the implementation of the **conditional diffusion model
 > *Joint probabilistic inference of galaxy redshifts and rest-frame spectra from photometric fluxes with latent diffusion*
 
 
-Given broadband photometric fluxes $\mathbf{x}$, the model learns the conditional distribution $p(\mathbf{t}_0 \mid \mathbf{x})$, where $\mathbf{t}_0 = [\mathbf{s}; z]$ concatenates a spectral latent representation $\mathbf{s}$ with the galaxy redshift $z$. Drawing multiple samples from this distribution provides probabilistic predictions of redshift and spectral latents. Sampled latents can be decoded into rest-frame spectra with a trained [spender](https://github.com/pmelchior/spender) decoder (Melchior et al. 2023).
+This repository trains and samples the conditional diffusion model. Given broadband photometric fluxes $\mathbf{x}$, the model learns the conditional distribution $p(\mathbf{t}_0 \mid \mathbf{x})$, where $\mathbf{t}_0 = [\mathbf{s}; z]$ concatenates a spectral latent representation $\mathbf{s}$ with the galaxy redshift $z$. Drawing multiple samples from this distribution provides probabilistic predictions of redshift and spectral latents. Sampled latents can be decoded into rest-frame spectra with a `spender` decoder (Melchior et al. 2023); the public [`spender`](https://github.com/pmelchior/spender) repository provides the autoencoder implementation used for that step.
 
-
-This repository trains and samples the conditional diffusion model. The spectral latents **s** are assumed to have been obtained beforehand with [`spender`](https://github.com/pmelchior/spender).
 
 ## Model architecture
 
