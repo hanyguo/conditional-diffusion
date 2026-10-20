@@ -1,12 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-Conditional DDPM/DDIM for Tabular Features
-Predicting astrophysical features and redshift from flux
-
-Usage:
-    python train_and_sampling.py --data_dir ./data
-    python train_and_sampling.py --help
+Train and sample a conditional diffusion model for joint
+galaxy redshift and spectral latent inference from photometric fluxes.
 """
 import os
 import time
