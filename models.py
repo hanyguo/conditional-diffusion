@@ -1,13 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-Model architectures for Conditional DDPM/DDIM
+Model architectures for conditional diffusion inference of
+galaxy redshifts and spectral latents from photometric fluxes.
+"""
 
-Contains:
-    - Diffusion: DDPM/DDIM forward and reverse diffusion process
-    - CondDenoiser: Conditional noise prediction network
-    - SinusoidalTimeEmbedding: Sinusoidal timestep embedding
-"""
 import math
 import torch
 import torch.nn as nn
